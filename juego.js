@@ -10,6 +10,10 @@
 const canvas = document.getElementById('juego');
 const ctx    = canvas.getContext('2d');
 
+// El canvas ocupa todo el espacio disponible de la ventana
+canvas.width  = window.innerWidth;
+canvas.height = window.innerHeight;
+
 const pantallaInicio  = document.getElementById('pantalla-inicio');
 const pantallaFin     = document.getElementById('pantalla-fin');
 const tituloFin       = document.getElementById('titulo-fin');
@@ -25,8 +29,8 @@ const cuentaAtrasEl    = document.getElementById('cuenta-atras');
 const miniaturasFotos  = document.getElementById('miniaturas-fotos');
 const btnOmitirCamara  = document.getElementById('btn-omitir-camara');
 
-const ANCHO = canvas.width;   // 560
-const ALTO  = canvas.height;  // 580
+const ANCHO = canvas.width;
+const ALTO  = canvas.height;
 
 
 // --- 1B. SONIDO ---
@@ -41,6 +45,12 @@ sonidoGolpeJefe.volume = 0.6;
 const sonidoJefeMuere = new Audio('bossdead.mp3');
 sonidoJefeMuere.volume = 0.7;
 
+const sonidoDisparo = new Audio('laser-gun.mp3');
+sonidoDisparo.volume = 0.25;
+
+const sonidoOvniMuere = new Audio('killovni.mp3');
+sonidoOvniMuere.volume = 0.5;
+
 // Permite que un sonido se solape con su propia reproducción anterior
 function reproducir(audio) {
   const copia = audio.cloneNode();
@@ -51,10 +61,10 @@ function reproducir(audio) {
 
 // --- 2. ESTADO DEL JUEGO ---
 
-let jugadores, balas, enemigos, particulas, items;
+let jugadores, balas, enemigos, particulas, items, estrellas;
 let nivel, juegoActivo, animacionId;
 let teclas = {};
-let dirEnemigos, velocidadEnemigos, timerItem, timerRevivir, timerEscudo;
+let velocidadEnemigos, timerItem, timerRevivir, timerEscudo;
 
 // Fotos del jugador para el jefe: [normal, golpe, muerte]
 let fotosJefe       = [];
@@ -214,13 +224,13 @@ function iniciarJuego() {
   particulas        = [];
   items             = [];
   nivel             = 1;
-  dirEnemigos       = 1;
-  velocidadEnemigos = 0.7;
+  velocidadEnemigos = 1.1;
   timerItem         = 360 + Math.random() * 360;
   timerRevivir      = 1800 + Math.random() * 1200;
   timerEscudo       = 1200 + Math.random() * 1200;
   juegoActivo       = true;
 
+  estrellas = crearEstrellas();
   crearEnemigos();
 
   pantallaInicio.classList.add('oculto');
@@ -237,20 +247,20 @@ function iniciarJuego() {
 // --- 5. CREAR OLEADA DE ENEMIGOS ---
 
 function crearEnemigos() {
-  const filas    = 3;
-  const columnas = 9;
+  const cantidad = 16 + Math.floor(Math.random() * 17); // entre 16 y 32 ovnis
 
-  for (let f = 0; f < filas; f++) {
-    for (let c = 0; c < columnas; c++) {
-      enemigos.push({
-        x:    20 + c * 58,
-        y:    30 + f * 44,
-        ancho: 32,
-        alto:  22,
-        tipo:  f,
-        timerDisparo: 100 + Math.random() * 200
-      });
-    }
+  for (let i = 0; i < cantidad; i++) {
+    const angulo = Math.random() * Math.PI * 2;
+    enemigos.push({
+      x:    20 + Math.random() * (ANCHO - 52),
+      y:    20 + Math.random() * 100,
+      ancho: 32,
+      alto:  22,
+      tipo:  i % 3,
+      vx:    Math.cos(angulo) * velocidadEnemigos,
+      vy:    Math.sin(angulo) * velocidadEnemigos,
+      timerDisparo: 100 + Math.random() * 200
+    });
   }
 }
 
@@ -297,6 +307,7 @@ function bucle() {
 // --- 7. ACTUALIZAR ---
 
 function actualizar() {
+  actualizarEstrellas();
   moverJugadores();
   moverBalas();
   moverEnemigos();
@@ -365,6 +376,7 @@ function moverJugadores() {
         jugadorId: j.id,   // para saber quién mató al enemigo
         color:     j.color
       });
+      reproducir(sonidoDisparo);
       j.cooldown = 18;
     }
   });
@@ -392,18 +404,34 @@ function moverEnemigos() {
     return;
   }
 
-  let tocoBorde = false;
+  const limiteY = ALTO - 142; // los ovnis nunca bajan hasta la zona de los jugadores
 
   enemigos.forEach(e => {
-    e.x += dirEnemigos * velocidadEnemigos;
-    if (e.x + e.ancho > ANCHO - 5 || e.x < 5) tocoBorde = true;
-  });
+    e.x += e.vx;
+    e.y += e.vy;
 
-  if (tocoBorde) {
-    dirEnemigos *= -1;
-    // Bajan hasta un límite, sin llegar nunca a la zona de los jugadores
-    enemigos.forEach(e => { e.y = Math.min(e.y + 16, ALTO - 142); });
-  }
+    // Rebotan en los límites de su zona de vuelo
+    if (e.x < 5 || e.x + e.ancho > ANCHO - 5) {
+      e.vx *= -1;
+      e.x = Math.max(5, Math.min(ANCHO - 5 - e.ancho, e.x));
+    }
+    if (e.y < 5 || e.y > limiteY) {
+      e.vy *= -1;
+      e.y = Math.max(5, Math.min(limiteY, e.y));
+    }
+
+    // De vez en cuando cambian ligeramente de rumbo, para un vuelo más orgánico
+    if (Math.random() < 0.01) {
+      e.vx += (Math.random() - 0.5) * 0.4;
+      e.vy += (Math.random() - 0.5) * 0.4;
+
+      const velocidad = Math.hypot(e.vx, e.vy) || 1;
+      const limite    = Math.max(0.6, Math.min(1.4, velocidad / velocidadEnemigos)) * velocidadEnemigos;
+      const factor    = limite / velocidad;
+      e.vx *= factor;
+      e.vy *= factor;
+    }
+  });
 }
 
 function moverJefe(jefe) {
@@ -531,6 +559,7 @@ function comprobarColisiones() {
           enemigo.y + enemigo.alto / 2,
           '#f80', 10
         );
+        reproducir(sonidoOvniMuere);
         // Dar puntos al jugador que disparó
         const jugador = jugadores.find(p => p.id === b.jugadorId);
         if (jugador) jugador.puntos += 10 * nivel;
@@ -657,8 +686,9 @@ function actualizarItems() {
         } else if (it.tipo === 'revivir') {
           const companero = jugadores.find(p => !p.vivo);
           if (companero) {
-            companero.vivo  = true;
-            companero.vidas = 1;
+            companero.vivo         = true;
+            companero.vidas        = 1;
+            companero.invulnerable = 90; // 1.5s de invulnerabilidad al revivir
           }
         } else if (it.tipo === 'escudo') {
           j.invulnerable = 300; // 5s de invulnerabilidad
@@ -674,6 +704,32 @@ function actualizarItems() {
       items.splice(i, 1);
     }
   }
+}
+
+
+// --- 13C. ESTRELLAS DE FONDO (efecto de avance) ---
+
+function crearEstrellas() {
+  const estrellas = [];
+  for (let i = 0; i < 60; i++) {
+    estrellas.push({
+      x:    Math.random() * ANCHO,
+      y:    Math.random() * ALTO,
+      tam:  Math.random() < 0.2 ? 2 : 1,
+      velocidad: 1 + Math.random() * 2.5
+    });
+  }
+  return estrellas;
+}
+
+function actualizarEstrellas() {
+  estrellas.forEach(e => {
+    e.y += e.velocidad;
+    if (e.y > ALTO) {
+      e.y = 0;
+      e.x = Math.random() * ANCHO;
+    }
+  });
 }
 
 
@@ -694,11 +750,9 @@ function dibujar() {
 
 function dibujarEstrellas() {
   ctx.fillStyle = '#fff';
-  for (let i = 0; i < 55; i++) {
-    const x = (i * 137) % ANCHO;
-    const y = (i * 97 + Date.now() * 0.02 * (i % 3 + 1)) % ALTO;
-    ctx.fillRect(x, y, i % 5 === 0 ? 2 : 1, i % 5 === 0 ? 2 : 1);
-  }
+  estrellas.forEach(e => {
+    ctx.fillRect(e.x, e.y, e.tam, e.tam);
+  });
 }
 
 function dibujarJugador(p) {
@@ -738,13 +792,26 @@ function dibujarJugador(p) {
 
   // Escudo de invulnerabilidad (recogido como item)
   if (p.escudo > 0) {
+    const cx = p.x + p.ancho / 2;
+    const cy = p.y + p.alto / 2;
+    const radio = Math.max(p.ancho, p.alto) * 0.78;
+
     ctx.save();
     ctx.globalAlpha = 0.4 + Math.sin(Date.now() * 0.015) * 0.25;
     ctx.strokeStyle = '#0ff';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(p.x + p.ancho / 2, p.y + p.alto / 2, Math.max(p.ancho, p.alto) * 0.78, 0, Math.PI * 2);
+    ctx.arc(cx, cy, radio, 0, Math.PI * 2);
     ctx.stroke();
+    ctx.restore();
+
+    // Cuenta atrás de segundos restantes del escudo
+    ctx.save();
+    ctx.fillStyle = '#0ff';
+    ctx.font = 'bold 12px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(Math.ceil(p.escudo / 60), cx, cy - radio - 6);
+    ctx.textAlign = 'left';
     ctx.restore();
   }
 }

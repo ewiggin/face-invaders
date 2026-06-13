@@ -6,15 +6,19 @@ body {
   justify-content: center;
   align-items: center;
   height: 100vh;
+  overflow: hidden;
   font-family: monospace;
 }
 
-#contenedor { position: relative; }
+#contenedor {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+}
 
 #juego {
   display: block;
   background: #000;
-  border: 2px solid #333;
 }
 
 #pantalla-inicio,
