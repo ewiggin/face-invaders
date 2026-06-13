@@ -1,0 +1,84 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: #111;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  font-family: monospace;
+}
+
+#contenedor { position: relative; }
+
+#juego {
+  display: block;
+  background: #000;
+  border: 2px solid #333;
+}
+
+#pantalla-inicio,
+#pantalla-fin {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.88);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  color: white;
+}
+
+h1 { font-size: 26px; color: #fff; }
+h2 { font-size: 14px; color: #888; letter-spacing: 4px; }
+
+.controles {
+  display: flex;
+  gap: 24px;
+  margin: 8px 0;
+}
+
+.jugador-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 20px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #ccc;
+}
+
+.jugador-info.p1 { border: 1px solid #4af; }
+.jugador-info.p2 { border: 1px solid #f84; }
+
+.etiqueta {
+  font-size: 12px;
+  font-weight: bold;
+  margin-bottom: 4px;
+}
+
+.p1 .etiqueta { color: #4af; }
+.p2 .etiqueta { color: #f84; }
+
+.marcador-fin {
+  display: flex;
+  gap: 24px;
+}
+
+button {
+  margin-top: 8px;
+  padding: 10px 30px;
+  background: transparent;
+  border: 1px solid #4af;
+  color: #4af;
+  font-family: monospace;
+  font-size: 15px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+button:hover { background: rgba(68,170,255,0.15); }
+
+.oculto { display: none !important; }

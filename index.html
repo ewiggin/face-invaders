@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Space Shooter 2 Jugadores</title>
+  <link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+
+  <div id="contenedor">
+    <canvas id="juego" width="560" height="580"></canvas>
+
+    <div id="pantalla-inicio">
+      <h1>🚀 SPACE SHOOTER</h1>
+      <h2>2 JUGADORES</h2>
+      <div class="controles">
+        <div class="jugador-info p1">
+          <span class="etiqueta">JUGADOR 1</span>
+          <span>A / D — Mover</span>
+          <span>W — Disparar</span>
+        </div>
+        <div class="jugador-info p2">
+          <span class="etiqueta">JUGADOR 2</span>
+          <span>← / → — Mover</span>
+          <span>↑ — Disparar</span>
+        </div>
+      </div>
+      <button id="btn-jugar">JUGAR</button>
+    </div>
+
+    <div id="pantalla-fin" class="oculto">
+      <h1 id="titulo-fin">GAME OVER</h1>
+      <div class="marcador-fin">
+        <div class="jugador-info p1">
+          <span class="etiqueta">JUGADOR 1</span>
+          <span id="puntos-p1-fin">0 pts</span>
+        </div>
+        <div class="jugador-info p2">
+          <span class="etiqueta">JUGADOR 2</span>
+          <span id="puntos-p2-fin">0 pts</span>
+        </div>
+      </div>
+      <button id="btn-reiniciar">JUGAR DE NUEVO</button>
+    </div>
+  </div>
+
+  <script src="juego.js"></script>
+</body>
+</html>
