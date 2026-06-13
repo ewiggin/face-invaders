@@ -18,6 +18,7 @@ body {
 }
 
 #pantalla-inicio,
+#pantalla-camara,
 #pantalla-fin {
   position: absolute;
   inset: 0;
@@ -82,3 +83,63 @@ button {
 button:hover { background: rgba(68,170,255,0.15); }
 
 .oculto { display: none !important; }
+
+#pantalla-camara p {
+  max-width: 380px;
+  text-align: center;
+  font-size: 13px;
+  color: #ccc;
+  padding: 0 12px;
+}
+
+.video-wrapper {
+  position: relative;
+  width: 240px;
+  height: 240px;
+}
+
+#video-camara {
+  width: 240px;
+  height: 240px;
+  object-fit: cover;
+  border-radius: 50%;
+  border: 3px solid #4af;
+  background: #222;
+  transform: scaleX(-1);
+}
+
+#cuenta-atras {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 48px;
+  font-weight: bold;
+  color: #fff;
+  text-shadow: 0 0 10px #000, 0 0 20px #000;
+  pointer-events: none;
+}
+
+#miniaturas-fotos {
+  display: flex;
+  gap: 10px;
+  min-height: 56px;
+}
+
+#miniaturas-fotos img {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  border: 2px solid #4af;
+  object-fit: cover;
+}
+
+#btn-omitir-camara {
+  border-color: #666;
+  color: #888;
+  font-size: 12px;
+  padding: 6px 18px;
+}
+
+#btn-omitir-camara:hover { background: rgba(255,255,255,0.08); }

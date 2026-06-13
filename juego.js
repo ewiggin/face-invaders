@@ -18,16 +18,48 @@ const puntosP2Fin     = document.getElementById('puntos-p2-fin');
 const btnJugar        = document.getElementById('btn-jugar');
 const btnReiniciar    = document.getElementById('btn-reiniciar');
 
+const pantallaCamara   = document.getElementById('pantalla-camara');
+const videoCamara      = document.getElementById('video-camara');
+const instruccionFoto  = document.getElementById('instruccion-foto');
+const cuentaAtrasEl    = document.getElementById('cuenta-atras');
+const miniaturasFotos  = document.getElementById('miniaturas-fotos');
+const btnOmitirCamara  = document.getElementById('btn-omitir-camara');
+
 const ANCHO = canvas.width;   // 560
 const ALTO  = canvas.height;  // 580
 
 
+// --- 1B. SONIDO ---
+
+const musicaFondo = new Audio('music.mp3');
+musicaFondo.loop   = true;
+musicaFondo.volume = 0.35;
+
+const sonidoGolpeJefe = new Audio('hitboss.mp3');
+sonidoGolpeJefe.volume = 0.6;
+
+const sonidoJefeMuere = new Audio('bossdead.mp3');
+sonidoJefeMuere.volume = 0.7;
+
+// Permite que un sonido se solape con su propia reproducción anterior
+function reproducir(audio) {
+  const copia = audio.cloneNode();
+  copia.volume = audio.volume;
+  copia.play().catch(() => {});
+}
+
+
 // --- 2. ESTADO DEL JUEGO ---
 
-let jugadores, balas, enemigos, particulas;
+let jugadores, balas, enemigos, particulas, items;
 let nivel, juegoActivo, animacionId;
 let teclas = {};
-let dirEnemigos, velocidadEnemigos;
+let dirEnemigos, velocidadEnemigos, timerItem;
+
+// Fotos del jugador para el jefe: [normal, golpe, muerte]
+let fotosJefe       = [];
+let streamCamara    = null;
+let capturaCancelada = false;
 
 
 // --- 3. DEFINICIÓN DE LOS DOS JUGADORES ---
@@ -76,6 +108,99 @@ function crearJugadores() {
 }
 
 
+// --- 3B. CÁMARA: CAPTURA DE FOTOS PARA EL JEFE ---
+
+const INSTRUCCIONES_FOTO = [
+  'Foto 1/4 — Pose NORMAL del jefe (A). Mira al frente con cara tranquila.',
+  'Foto 2/4 — Pose NORMAL del jefe (B). Otra expresión tranquila distinta: el jefe irá alternando entre esta y la foto 1.',
+  'Foto 3/4 — Cara de IMPACTO. Pon cara de dolor o sorpresa, ¡el jefe la pondrá al recibir un golpe!',
+  'Foto 4/4 — Cara de DERROTA. Pon cara de fuera de combate, ¡el jefe la pondrá al morir!'
+];
+
+function esperar(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function cuentaAtras(segundos) {
+  for (let i = segundos; i >= 1; i--) {
+    cuentaAtrasEl.textContent = i;
+    await esperar(700);
+    if (capturaCancelada) return;
+  }
+  cuentaAtrasEl.textContent = '📸';
+  await esperar(250);
+  cuentaAtrasEl.textContent = '';
+}
+
+function capturarFotograma() {
+  const lado = Math.min(videoCamara.videoWidth, videoCamara.videoHeight);
+  const sx   = (videoCamara.videoWidth  - lado) / 2;
+  const sy   = (videoCamara.videoHeight - lado) / 2;
+
+  const lienzo = document.createElement('canvas');
+  lienzo.width  = 160;
+  lienzo.height = 160;
+
+  const lctx = lienzo.getContext('2d');
+  // Espejar horizontalmente para que coincida con la previsualización
+  lctx.translate(160, 0);
+  lctx.scale(-1, 1);
+  lctx.drawImage(videoCamara, sx, sy, lado, lado, 0, 0, 160, 160);
+
+  return lienzo;
+}
+
+function agregarMiniatura(lienzo) {
+  const img = document.createElement('img');
+  img.src = lienzo.toDataURL('image/png');
+  miniaturasFotos.appendChild(img);
+}
+
+function detenerCamara() {
+  if (streamCamara) {
+    streamCamara.getTracks().forEach(t => t.stop());
+    streamCamara = null;
+  }
+  videoCamara.srcObject = null;
+}
+
+async function iniciarSecuenciaCamara() {
+  pantallaInicio.classList.add('oculto');
+  pantallaCamara.classList.remove('oculto');
+
+  fotosJefe          = [];
+  capturaCancelada   = false;
+  miniaturasFotos.innerHTML = '';
+  instruccionFoto.textContent = 'Pidiendo acceso a la cámara...';
+  cuentaAtrasEl.textContent = '';
+
+  try {
+    streamCamara = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+    videoCamara.srcObject = streamCamara;
+    await videoCamara.play();
+
+    for (let i = 0; i < 4 && !capturaCancelada; i++) {
+      instruccionFoto.textContent = INSTRUCCIONES_FOTO[i];
+      await cuentaAtras(3);
+      if (capturaCancelada) break;
+
+      const foto = capturarFotograma();
+      fotosJefe.push(foto);
+      agregarMiniatura(foto);
+      await esperar(400);
+    }
+  } catch (err) {
+    console.warn('No se pudo acceder a la cámara:', err);
+  }
+
+  if (fotosJefe.length < 4) fotosJefe = [];
+
+  detenerCamara();
+  pantallaCamara.classList.add('oculto');
+  iniciarJuego();
+}
+
+
 // --- 4. INICIAR / REINICIAR ---
 
 function iniciarJuego() {
@@ -83,15 +208,20 @@ function iniciarJuego() {
   balas             = [];
   enemigos          = [];
   particulas        = [];
+  items             = [];
   nivel             = 1;
   dirEnemigos       = 1;
   velocidadEnemigos = 0.7;
+  timerItem         = 360 + Math.random() * 360;
   juegoActivo       = true;
 
   crearEnemigos();
 
   pantallaInicio.classList.add('oculto');
   pantallaFin.classList.add('oculto');
+
+  musicaFondo.currentTime = 0;
+  musicaFondo.play().catch(() => {});
 
   cancelAnimationFrame(animacionId);
   animacionId = requestAnimationFrame(bucle);
@@ -119,6 +249,34 @@ function crearEnemigos() {
 }
 
 
+// --- 5B. CREAR JEFE (cada 3 niveles) ---
+
+function crearJefe() {
+  const numero  = nivel / 3;          // 1º, 2º, 3º jefe...
+  const vidaMax = 10 + (numero - 1) * 6;  // cada jefe tiene más vida que el anterior
+  const ancho   = 100;
+  const alto    = 90;
+
+  enemigos.push({
+    esJefe:       true,
+    numero:       numero,
+    x:            ANCHO / 2 - ancho / 2,
+    y:            40,
+    yBase:        40,
+    ancho:        ancho,
+    alto:         alto,
+    vida:         vidaMax,
+    vidaMax:      vidaMax,
+    golpeFlash:   0,
+    muriendo:     false,
+    muerteTimer:  0,
+    tiempo:       0,
+    velocidad:    Math.min(1.5 + (numero - 1) * 0.4, 4),
+    timerDisparo: 90
+  });
+}
+
+
 // --- 6. BUCLE PRINCIPAL ---
 
 function bucle() {
@@ -138,12 +296,36 @@ function actualizar() {
   enemigosDisparar();
   comprobarColisiones();
   actualizarParticulas();
+  actualizarJefe();
+  actualizarItems();
 
   // Nueva oleada si no quedan enemigos
   if (enemigos.length === 0) {
     nivel++;
-    velocidadEnemigos = Math.min(velocidadEnemigos + 0.35, 3.5);
-    crearEnemigos();
+    if (nivel % 3 === 0) {
+      crearJefe();
+    } else {
+      velocidadEnemigos = Math.min(velocidadEnemigos + 0.35, 3.5);
+      crearEnemigos();
+    }
+  }
+}
+
+
+// --- 7B. ACTUALIZAR JEFE (flash de golpe / animación de muerte) ---
+
+function actualizarJefe() {
+  const jefe = enemigos.find(e => e.esJefe);
+  if (!jefe) return;
+
+  jefe.tiempo++;
+  if (jefe.golpeFlash > 0) jefe.golpeFlash--;
+
+  if (jefe.muriendo) {
+    jefe.muerteTimer--;
+    if (jefe.muerteTimer <= 0) {
+      enemigos.splice(enemigos.indexOf(jefe), 1);
+    }
   }
 }
 
@@ -194,6 +376,12 @@ function moverBalas() {
 // --- 10. MOVER ENEMIGOS ---
 
 function moverEnemigos() {
+  const jefe = enemigos.find(e => e.esJefe);
+  if (jefe) {
+    moverJefe(jefe);
+    return;
+  }
+
   let tocoBorde = false;
 
   enemigos.forEach(e => {
@@ -207,11 +395,34 @@ function moverEnemigos() {
   }
 }
 
+function moverJefe(jefe) {
+  if (jefe.muriendo) return;
+
+  jefe.x += dirEnemigos * jefe.velocidad;
+  if (jefe.x + jefe.ancho > ANCHO - 10 || jefe.x < 10) {
+    dirEnemigos *= -1;
+    jefe.x = Math.max(10, Math.min(ANCHO - 10 - jefe.ancho, jefe.x));
+  }
+
+  // Ligero balanceo vertical
+  jefe.y = jefe.yBase + Math.sin(jefe.tiempo * 0.05) * 12;
+}
+
 
 // --- 11. ENEMIGOS DISPARAN ---
 
 function enemigosDisparar() {
   enemigos.forEach(e => {
+    if (e.esJefe) {
+      if (e.muriendo) return;
+      e.timerDisparo--;
+      if (e.timerDisparo <= 0) {
+        jefeDisparar(e);
+        e.timerDisparo = Math.max(35, 90 - e.numero * 12) + Math.random() * 40;
+      }
+      return;
+    }
+
     e.timerDisparo--;
     if (e.timerDisparo <= 0) {
       balas.push({
@@ -226,6 +437,25 @@ function enemigosDisparar() {
       e.timerDisparo = 100 + Math.random() * 160;
     }
   });
+}
+
+function jefeDisparar(jefe) {
+  // Los jefes más avanzados disparan en abanico
+  const disparos = Math.min(1 + Math.floor((jefe.numero - 1) / 2), 3);
+  const centroX  = jefe.x + jefe.ancho / 2;
+
+  for (let i = 0; i < disparos; i++) {
+    const offset = (i - (disparos - 1) / 2) * 26;
+    balas.push({
+      x:         centroX + offset - 3,
+      y:         jefe.y + jefe.alto,
+      ancho:     6,
+      alto:      14,
+      velocidad: -4,
+      esJugador: false,
+      color:     '#a4f'
+    });
+  }
 }
 
 
@@ -247,10 +477,38 @@ function comprobarColisiones() {
     if (!b.esJugador) continue;
 
     for (let j = enemigos.length - 1; j >= 0; j--) {
-      if (seTocan(b, enemigos[j])) {
+      const enemigo = enemigos[j];
+
+      // El jefe absorbe varios golpes antes de morir
+      if (enemigo.esJefe) {
+        if (enemigo.muriendo) continue;
+        if (!seTocan(b, enemigo)) continue;
+
+        explotar(b.x + b.ancho / 2, b.y, '#a4f', 8);
+
+        const jugador = jugadores.find(p => p.id === b.jugadorId);
+        enemigo.vida--;
+        enemigo.golpeFlash = 14;
+        balas.splice(i, 1);
+        reproducir(sonidoGolpeJefe);
+
+        if (enemigo.vida <= 0) {
+          enemigo.muriendo    = true;
+          enemigo.muerteTimer = 90;
+          explotar(enemigo.x + enemigo.ancho / 2, enemigo.y + enemigo.alto / 2, '#a4f', 40);
+          reproducir(sonidoJefeMuere);
+          if (jugador) jugador.puntos += 100 * enemigo.numero;
+        } else if (jugador) {
+          jugador.puntos += 5 * nivel;
+        }
+
+        break;
+      }
+
+      if (seTocan(b, enemigo)) {
         explotar(
-          enemigos[j].x + enemigos[j].ancho / 2,
-          enemigos[j].y + enemigos[j].alto / 2,
+          enemigo.x + enemigo.ancho / 2,
+          enemigo.y + enemigo.alto / 2,
           '#f80', 10
         );
         // Dar puntos al jugador que disparó
@@ -287,8 +545,8 @@ function comprobarColisiones() {
     });
   }
 
-  // Enemigos llegan abajo
-  if (enemigos.some(e => e.y + e.alto >= ALTO - 60)) {
+  // Enemigos llegan abajo (el jefe no avanza hacia los jugadores)
+  if (enemigos.some(e => !e.esJefe && e.y + e.alto >= ALTO - 60)) {
     terminarJuego();
   }
 }
@@ -321,6 +579,51 @@ function actualizarParticulas() {
 }
 
 
+// --- 13B. CAJA DE PROVISIONES (+1 vida) ---
+
+function crearItem() {
+  items.push({
+    x:         20 + Math.random() * (ANCHO - 60),
+    y:        -30,
+    ancho:     26,
+    alto:      26,
+    velocidad: 2
+  });
+}
+
+function actualizarItems() {
+  timerItem--;
+  if (timerItem <= 0) {
+    crearItem();
+    timerItem = 500 + Math.random() * 500;
+  }
+
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    it.y += it.velocidad;
+
+    if (it.y > ALTO + 20) {
+      items.splice(i, 1);
+      continue;
+    }
+
+    let recogido = false;
+    jugadores.forEach(j => {
+      if (!j.vivo) return;
+      if (seTocan(it, j)) {
+        j.vidas = Math.min(3, j.vidas + 1);
+        recogido = true;
+      }
+    });
+
+    if (recogido) {
+      explotar(it.x + it.ancho / 2, it.y + it.alto / 2, '#4f4', 16);
+      items.splice(i, 1);
+    }
+  }
+}
+
+
 // --- 14. DIBUJAR ---
 
 function dibujar() {
@@ -330,6 +633,7 @@ function dibujar() {
   dibujarEstrellas();
   dibujarEnemigos();
   dibujarBalas();
+  dibujarItems();
   jugadores.forEach(j => { if (j.vivo) dibujarJugador(j); });
   dibujarParticulas();
   dibujarHUD();
@@ -376,6 +680,11 @@ function dibujarJugador(p) {
 function dibujarEnemigos() {
   const colores = ['#f44', '#f80', '#fa0'];
   enemigos.forEach(e => {
+    if (e.esJefe) {
+      dibujarJefe(e);
+      return;
+    }
+
     ctx.fillStyle = colores[e.tipo] || '#f44';
     ctx.beginPath();
     ctx.moveTo(e.x + e.ancho / 2, e.y + e.alto);
@@ -394,6 +703,123 @@ function dibujarEnemigos() {
   });
 }
 
+
+// --- 14B. DIBUJAR JEFE ---
+
+function dibujarJefe(jefe) {
+  const cx = jefe.x + jefe.ancho / 2;
+  const cy = jefe.y + jefe.alto / 2;
+
+  let estado = 'normal';
+  if (jefe.muriendo) estado = 'muerte';
+  else if (jefe.golpeFlash > 0) estado = 'golpe';
+
+  if (fotosJefe.length === 4) {
+    dibujarJefeConFoto(jefe, cx, cy, estado);
+  } else {
+    dibujarJefeFallback(jefe, cx, cy, estado);
+  }
+
+  // Barra de vida y etiqueta
+  if (!jefe.muriendo) {
+    const pct = Math.max(0, jefe.vida / jefe.vidaMax);
+    ctx.fillStyle = '#333';
+    ctx.fillRect(jefe.x, jefe.y - 16, jefe.ancho, 6);
+    ctx.fillStyle = pct > 0.5 ? '#4f4' : pct > 0.25 ? '#ff4' : '#f44';
+    ctx.fillRect(jefe.x, jefe.y - 16, jefe.ancho * pct, 6);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = '11px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`JEFE ${jefe.numero}`, cx, jefe.y - 20);
+    ctx.textAlign = 'left';
+  }
+}
+
+function dibujarJefeConFoto(jefe, cx, cy, estado) {
+  let img;
+  if (estado === 'muerte') {
+    img = fotosJefe[3];
+  } else if (estado === 'golpe') {
+    img = fotosJefe[2];
+  } else {
+    // Pose normal: alterna entre las fotos 1 y 2 para dar sensación de animación
+    img = Math.floor(jefe.tiempo / 30) % 2 === 0 ? fotosJefe[0] : fotosJefe[1];
+  }
+
+  const radioX = jefe.ancho / 2;
+  const radioY = jefe.alto / 2;
+
+  ctx.save();
+  if (jefe.muriendo) {
+    ctx.globalAlpha = Math.max(0.1, jefe.muerteTimer / 90);
+  }
+
+  // Marco exterior tipo nave
+  ctx.fillStyle = estado === 'golpe' ? '#fff' : '#a4f';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, radioX + 6, radioY + 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Foto recortada en óvalo
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, radioX, radioY, 0, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.drawImage(img, jefe.x, jefe.y, jefe.ancho, jefe.alto);
+
+  // Destello rojo al recibir un golpe
+  if (estado === 'golpe') {
+    ctx.fillStyle = 'rgba(255,0,0,0.35)';
+    ctx.fillRect(jefe.x, jefe.y, jefe.ancho, jefe.alto);
+  }
+
+  ctx.restore();
+}
+
+function dibujarJefeFallback(jefe, cx, cy, estado) {
+  ctx.save();
+  if (jefe.muriendo) {
+    ctx.globalAlpha = Math.max(0.1, jefe.muerteTimer / 90);
+  }
+
+  let color = '#a4f';
+  if (estado === 'golpe')  color = '#fff';
+  if (estado === 'muerte') color = '#666';
+
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(cx,                        jefe.y + jefe.alto);
+  ctx.lineTo(jefe.x,                    jefe.y + jefe.alto * 0.35);
+  ctx.lineTo(jefe.x + jefe.ancho * 0.15, jefe.y);
+  ctx.lineTo(jefe.x + jefe.ancho * 0.85, jefe.y);
+  ctx.lineTo(jefe.x + jefe.ancho,       jefe.y + jefe.alto * 0.35);
+  ctx.closePath();
+  ctx.fill();
+
+  const ojoY = jefe.y + jefe.alto * 0.35;
+
+  if (estado === 'muerte') {
+    ctx.strokeStyle = '#f44';
+    ctx.lineWidth = 3;
+    [cx - jefe.ancho * 0.18, cx + jefe.ancho * 0.18].forEach(ox => {
+      ctx.beginPath();
+      ctx.moveTo(ox - 6, ojoY - 6);
+      ctx.lineTo(ox + 6, ojoY + 6);
+      ctx.moveTo(ox + 6, ojoY - 6);
+      ctx.lineTo(ox - 6, ojoY + 6);
+      ctx.stroke();
+    });
+  } else {
+    ctx.fillStyle = estado === 'golpe' ? '#f00' : 'rgba(255,255,255,0.5)';
+    ctx.beginPath();
+    ctx.arc(cx - jefe.ancho * 0.18, ojoY, 7, 0, Math.PI * 2);
+    ctx.arc(cx + jefe.ancho * 0.18, ojoY, 7, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
 function dibujarBalas() {
   balas.forEach(b => {
     ctx.fillStyle = b.color;
@@ -403,6 +829,17 @@ function dibujarBalas() {
     ctx.fillRect(b.x, b.y + b.alto, b.ancho, 8);
     ctx.globalAlpha = 1;
   });
+}
+
+function dibujarItems() {
+  ctx.textAlign = 'center';
+  ctx.font = '22px monospace';
+  items.forEach(it => {
+    ctx.globalAlpha = 0.7 + Math.sin(it.y * 0.15) * 0.3;
+    ctx.fillText('📦', it.x + it.ancho / 2, it.y + it.alto);
+  });
+  ctx.globalAlpha = 1;
+  ctx.textAlign = 'left';
 }
 
 function dibujarParticulas() {
@@ -436,10 +873,11 @@ function dibujarHUD() {
   ctx.textAlign = 'left';
 
   // Nivel (centro)
-  ctx.fillStyle = '#888';
+  const hayJefe = enemigos.some(e => e.esJefe);
+  ctx.fillStyle = hayJefe ? '#a4f' : '#888';
   ctx.font = '12px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(`NIVEL ${nivel}`, ANCHO / 2, 20);
+  ctx.fillText(hayJefe ? `¡JEFE! · NIVEL ${nivel}` : `NIVEL ${nivel}`, ANCHO / 2, 20);
   ctx.textAlign = 'left';
 
   // Jugador muerto — mensaje en pantalla
@@ -462,6 +900,7 @@ function dibujarHUD() {
 function terminarJuego() {
   juegoActivo = false;
   cancelAnimationFrame(animacionId);
+  musicaFondo.pause();
 
   const p1 = jugadores[0];
   const p2 = jugadores[1];
@@ -502,5 +941,6 @@ document.addEventListener('keyup', e => {
 
 // --- 17. BOTONES ---
 
-btnJugar.addEventListener('click', iniciarJuego);
+btnJugar.addEventListener('click', iniciarSecuenciaCamara);
 btnReiniciar.addEventListener('click', iniciarJuego);
+btnOmitirCamara.addEventListener('click', () => { capturaCancelada = true; });
