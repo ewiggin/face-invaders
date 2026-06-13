@@ -54,7 +54,7 @@ function reproducir(audio) {
 let jugadores, balas, enemigos, particulas, items;
 let nivel, juegoActivo, animacionId;
 let teclas = {};
-let dirEnemigos, velocidadEnemigos, timerItem, timerRevivir;
+let dirEnemigos, velocidadEnemigos, timerItem, timerRevivir, timerEscudo;
 
 // Fotos del jugador para el jefe: [normal, golpe, muerte]
 let fotosJefe       = [];
@@ -81,6 +81,8 @@ function crearJugadores() {
       colorCabina: '#8df',
       vivo:      true,
       cooldown:  0,
+      invulnerable: 0,
+      escudo:    0,
       // Teclas de control
       izquierda: 'a',
       derecha:   'd',
@@ -100,6 +102,8 @@ function crearJugadores() {
       colorCabina: '#fba',
       vivo:      true,
       cooldown:  0,
+      invulnerable: 0,
+      escudo:    0,
       izquierda: 'ArrowLeft',
       derecha:   'ArrowRight',
       disparo:   'ArrowUp'
@@ -214,6 +218,7 @@ function iniciarJuego() {
   velocidadEnemigos = 0.7;
   timerItem         = 360 + Math.random() * 360;
   timerRevivir      = 1800 + Math.random() * 1200;
+  timerEscudo       = 1200 + Math.random() * 1200;
   juegoActivo       = true;
 
   crearEnemigos();
@@ -336,6 +341,9 @@ function actualizarJefe() {
 
 function moverJugadores() {
   jugadores.forEach(j => {
+    if (j.invulnerable > 0) j.invulnerable--;
+    if (j.escudo > 0) j.escudo--;
+
     if (!j.vivo) return;
 
     if (teclas[j.izquierda]) j.x -= j.velocidad;
@@ -542,9 +550,17 @@ function comprobarColisiones() {
     jugadores.forEach(j => {
       if (!j.vivo) return;
       if (seTocan(b, j)) {
-        explotar(j.x + j.ancho / 2, j.y + j.alto / 2, j.color, 14);
         balas.splice(balas.indexOf(b), 1);
+
+        // Invulnerable (tras un golpe o por escudo): el impacto no hace daño
+        if (j.invulnerable > 0) {
+          explotar(j.x + j.ancho / 2, j.y + j.alto / 2, '#0ff', 6);
+          return;
+        }
+
+        explotar(j.x + j.ancho / 2, j.y + j.alto / 2, j.color, 14);
         j.vidas--;
+        j.invulnerable = 60; // 1s de invulnerabilidad tras recibir un golpe
 
         if (j.vidas <= 0) {
           j.vivo = false;
@@ -616,6 +632,13 @@ function actualizarItems() {
     timerRevivir = 1800 + Math.random() * 1200;
   }
 
+  // Muy de vez en cuando cae un escudo de invulnerabilidad temporal
+  timerEscudo--;
+  if (timerEscudo <= 0) {
+    crearItem('escudo');
+    timerEscudo = 1200 + Math.random() * 1200;
+  }
+
   for (let i = items.length - 1; i >= 0; i--) {
     const it = items[i];
     it.y += it.velocidad;
@@ -637,14 +660,17 @@ function actualizarItems() {
             companero.vivo  = true;
             companero.vidas = 1;
           }
+        } else if (it.tipo === 'escudo') {
+          j.invulnerable = 300; // 5s de invulnerabilidad
+          j.escudo       = 300;
         }
         recogido = true;
       }
     });
 
     if (recogido) {
-      const color = it.tipo === 'revivir' ? '#ff0' : '#4f4';
-      explotar(it.x + it.ancho / 2, it.y + it.alto / 2, color, 16);
+      const colores = { caja: '#4f4', revivir: '#ff0', escudo: '#0ff' };
+      explotar(it.x + it.ancho / 2, it.y + it.alto / 2, colores[it.tipo], 16);
       items.splice(i, 1);
     }
   }
@@ -676,6 +702,12 @@ function dibujarEstrellas() {
 }
 
 function dibujarJugador(p) {
+  ctx.save();
+  // Parpadeo durante la invulnerabilidad breve tras recibir un golpe
+  if (p.invulnerable > 0 && p.escudo === 0) {
+    ctx.globalAlpha = Math.floor(p.invulnerable / 4) % 2 === 0 ? 1 : 0.3;
+  }
+
   // Cuerpo
   ctx.fillStyle = p.color;
   ctx.beginPath();
@@ -702,6 +734,19 @@ function dibujarJugador(p) {
   ctx.textAlign = 'center';
   ctx.fillText(`P${p.id}`, p.x + p.ancho / 2, p.y + p.alto + 22);
   ctx.textAlign = 'left';
+  ctx.restore();
+
+  // Escudo de invulnerabilidad (recogido como item)
+  if (p.escudo > 0) {
+    ctx.save();
+    ctx.globalAlpha = 0.4 + Math.sin(Date.now() * 0.015) * 0.25;
+    ctx.strokeStyle = '#0ff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(p.x + p.ancho / 2, p.y + p.alto / 2, Math.max(p.ancho, p.alto) * 0.78, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 
 function dibujarEnemigos() {
@@ -874,12 +919,14 @@ function dibujarBalas() {
   });
 }
 
+const ICONOS_ITEM = { caja: '📦', revivir: '💖', escudo: '🛡️' };
+
 function dibujarItems() {
   ctx.textAlign = 'center';
   ctx.font = '22px monospace';
   items.forEach(it => {
     ctx.globalAlpha = 0.7 + Math.sin(it.y * 0.15) * 0.3;
-    ctx.fillText(it.tipo === 'revivir' ? '💖' : '📦', it.x + it.ancho / 2, it.y + it.alto);
+    ctx.fillText(ICONOS_ITEM[it.tipo], it.x + it.ancho / 2, it.y + it.alto);
   });
   ctx.globalAlpha = 1;
   ctx.textAlign = 'left';
