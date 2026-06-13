@@ -54,7 +54,7 @@ function reproducir(audio) {
 let jugadores, balas, enemigos, particulas, items;
 let nivel, juegoActivo, animacionId;
 let teclas = {};
-let dirEnemigos, velocidadEnemigos, timerItem;
+let dirEnemigos, velocidadEnemigos, timerItem, timerRevivir;
 
 // Fotos del jugador para el jefe: [normal, golpe, muerte]
 let fotosJefe       = [];
@@ -213,6 +213,7 @@ function iniciarJuego() {
   dirEnemigos       = 1;
   velocidadEnemigos = 0.7;
   timerItem         = 360 + Math.random() * 360;
+  timerRevivir      = 1800 + Math.random() * 1200;
   juegoActivo       = true;
 
   crearEnemigos();
@@ -253,7 +254,7 @@ function crearEnemigos() {
 
 function crearJefe() {
   const numero  = nivel / 3;          // 1º, 2º, 3º jefe...
-  const vidaMax = 10 + (numero - 1) * 6;  // cada jefe tiene más vida que el anterior
+  const vidaMax = 16 + (numero - 1) * 8;  // cada jefe tiene más vida que el anterior
   const ancho   = 100;
   const alto    = 90;
 
@@ -271,6 +272,7 @@ function crearJefe() {
     muriendo:     false,
     muerteTimer:  0,
     tiempo:       0,
+    dir:          1,
     velocidad:    Math.min(1.5 + (numero - 1) * 0.4, 4),
     timerDisparo: 90
   });
@@ -391,16 +393,22 @@ function moverEnemigos() {
 
   if (tocoBorde) {
     dirEnemigos *= -1;
-    enemigos.forEach(e => { e.y += 16; });
+    // Bajan hasta un límite, sin llegar nunca a la zona de los jugadores
+    enemigos.forEach(e => { e.y = Math.min(e.y + 16, ALTO - 142); });
   }
 }
 
 function moverJefe(jefe) {
   if (jefe.muriendo) return;
 
-  jefe.x += dirEnemigos * jefe.velocidad;
+  // Cambios de dirección erráticos, más frecuentes en jefes avanzados
+  if (Math.random() < 0.01 + jefe.numero * 0.004) {
+    jefe.dir *= -1;
+  }
+
+  jefe.x += jefe.dir * jefe.velocidad;
   if (jefe.x + jefe.ancho > ANCHO - 10 || jefe.x < 10) {
-    dirEnemigos *= -1;
+    jefe.dir *= -1;
     jefe.x = Math.max(10, Math.min(ANCHO - 10 - jefe.ancho, jefe.x));
   }
 
@@ -418,7 +426,11 @@ function enemigosDisparar() {
       e.timerDisparo--;
       if (e.timerDisparo <= 0) {
         jefeDisparar(e);
-        e.timerDisparo = Math.max(35, 90 - e.numero * 12) + Math.random() * 40;
+
+        // Cuanto más dañado está, más rápido dispara (hasta el doble de ritmo)
+        const factorEnfado = 0.5 + 0.5 * (e.vida / e.vidaMax);
+        const base = Math.max(18, 55 - e.numero * 6);
+        e.timerDisparo = Math.max(12, base * factorEnfado) + Math.random() * 15;
       }
       return;
     }
@@ -440,12 +452,12 @@ function enemigosDisparar() {
 }
 
 function jefeDisparar(jefe) {
-  // Los jefes más avanzados disparan en abanico
-  const disparos = Math.min(1 + Math.floor((jefe.numero - 1) / 2), 3);
+  // Los jefes más avanzados disparan ráfagas en abanico más amplias
+  const disparos = Math.min(3 + (jefe.numero - 1), 5);
   const centroX  = jefe.x + jefe.ancho / 2;
 
   for (let i = 0; i < disparos; i++) {
-    const offset = (i - (disparos - 1) / 2) * 26;
+    const offset = (i - (disparos - 1) / 2) * 22;
     balas.push({
       x:         centroX + offset - 3,
       y:         jefe.y + jefe.alto,
@@ -536,6 +548,7 @@ function comprobarColisiones() {
 
         if (j.vidas <= 0) {
           j.vivo = false;
+          reproducir(sonidoJefeMuere);
           // ¿Los dos han muerto?
           if (jugadores.every(p => !p.vivo)) {
             terminarJuego();
@@ -543,11 +556,6 @@ function comprobarColisiones() {
         }
       }
     });
-  }
-
-  // Enemigos llegan abajo (el jefe no avanza hacia los jugadores)
-  if (enemigos.some(e => !e.esJefe && e.y + e.alto >= ALTO - 60)) {
-    terminarJuego();
   }
 }
 
@@ -579,10 +587,11 @@ function actualizarParticulas() {
 }
 
 
-// --- 13B. CAJA DE PROVISIONES (+1 vida) ---
+// --- 13B. ITEMS: CAJA DE PROVISIONES (+1 vida) Y REANIMACIÓN ---
 
-function crearItem() {
+function crearItem(tipo) {
   items.push({
+    tipo,
     x:         20 + Math.random() * (ANCHO - 60),
     y:        -30,
     ancho:     26,
@@ -594,8 +603,17 @@ function crearItem() {
 function actualizarItems() {
   timerItem--;
   if (timerItem <= 0) {
-    crearItem();
+    crearItem('caja');
     timerItem = 500 + Math.random() * 500;
+  }
+
+  // Muy de vez en cuando, si hay un jugador eliminado, puede caer una reanimación
+  timerRevivir--;
+  if (timerRevivir <= 0) {
+    if (jugadores.some(j => !j.vivo)) {
+      crearItem('revivir');
+    }
+    timerRevivir = 1800 + Math.random() * 1200;
   }
 
   for (let i = items.length - 1; i >= 0; i--) {
@@ -611,13 +629,22 @@ function actualizarItems() {
     jugadores.forEach(j => {
       if (!j.vivo) return;
       if (seTocan(it, j)) {
-        j.vidas = Math.min(3, j.vidas + 1);
+        if (it.tipo === 'caja') {
+          j.vidas = Math.min(3, j.vidas + 1);
+        } else if (it.tipo === 'revivir') {
+          const companero = jugadores.find(p => !p.vivo);
+          if (companero) {
+            companero.vivo  = true;
+            companero.vidas = 1;
+          }
+        }
         recogido = true;
       }
     });
 
     if (recogido) {
-      explotar(it.x + it.ancho / 2, it.y + it.alto / 2, '#4f4', 16);
+      const color = it.tipo === 'revivir' ? '#ff0' : '#4f4';
+      explotar(it.x + it.ancho / 2, it.y + it.alto / 2, color, 16);
       items.splice(i, 1);
     }
   }
@@ -685,22 +712,38 @@ function dibujarEnemigos() {
       return;
     }
 
-    ctx.fillStyle = colores[e.tipo] || '#f44';
-    ctx.beginPath();
-    ctx.moveTo(e.x + e.ancho / 2, e.y + e.alto);
-    ctx.lineTo(e.x,               e.y + e.alto * 0.4);
-    ctx.lineTo(e.x + e.ancho * 0.15, e.y);
-    ctx.lineTo(e.x + e.ancho * 0.85, e.y);
-    ctx.lineTo(e.x + e.ancho,    e.y + e.alto * 0.4);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.fillStyle = 'rgba(255,255,255,0.35)';
-    ctx.beginPath();
-    ctx.arc(e.x + e.ancho * 0.33, e.y + e.alto * 0.35, 4, 0, Math.PI * 2);
-    ctx.arc(e.x + e.ancho * 0.67, e.y + e.alto * 0.35, 4, 0, Math.PI * 2);
-    ctx.fill();
+    dibujarOvni(e, colores[e.tipo] || '#f44');
   });
+}
+
+function dibujarOvni(e, color) {
+  const cx = e.x + e.ancho / 2;
+
+  // Cúpula de cristal
+  ctx.fillStyle = 'rgba(170,230,255,0.55)';
+  ctx.beginPath();
+  ctx.ellipse(cx, e.y + e.alto * 0.35, e.ancho * 0.26, e.alto * 0.32, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Plato
+  const platoCy = e.y + e.alto * 0.62;
+  const platoRx = e.ancho * 0.5;
+  const platoRy = e.alto * 0.3;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.ellipse(cx, platoCy, platoRx, platoRy, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Luces parpadeantes en el borde
+  for (let i = -1; i <= 1; i++) {
+    const lx = cx + i * platoRx * 0.6;
+    const ly = platoCy + platoRy * 0.5;
+    const encendida = Math.floor(Date.now() / 200 + i) % 2 === 0;
+    ctx.fillStyle = encendida ? '#fff' : 'rgba(255,255,255,0.25)';
+    ctx.beginPath();
+    ctx.arc(lx, ly, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 
 
@@ -836,7 +879,7 @@ function dibujarItems() {
   ctx.font = '22px monospace';
   items.forEach(it => {
     ctx.globalAlpha = 0.7 + Math.sin(it.y * 0.15) * 0.3;
-    ctx.fillText('📦', it.x + it.ancho / 2, it.y + it.alto);
+    ctx.fillText(it.tipo === 'revivir' ? '💖' : '📦', it.x + it.ancho / 2, it.y + it.alto);
   });
   ctx.globalAlpha = 1;
   ctx.textAlign = 'left';
